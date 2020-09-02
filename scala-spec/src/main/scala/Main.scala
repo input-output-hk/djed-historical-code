@@ -33,47 +33,59 @@ class Ledger {
   def addTransactions(ts: Iterable[Transaction]) = {}
 }
 
-// The idea:
-// The bank has a reserve and issues stablecoins when users demand it
-// The bank buys back stablecoins when users want to sell them
-// The bank profits (and its reserve grows) by trading the stablecoins with users using a spread
-// The bank is only allowed to issue stablecoins if the reserves are above a minimum threshold
-// The bank has shareholders.
-// Shareholders contribute to the reserves.
-// Shareholders receive dividends when the reserves are above a maximum threshold.
+// The bank keeps a reserve of an underlying base cryptocurrency 
+// The bank issues and redeems stablecoins and reservecoins
+// 
+// The stablecoin is pegged to a peg currency
+// The exchange rate between the peg currency and the base cryptocurrency is provided by an oracle
+//
+// The holder of a stablecoin has a claim to a variable portion of the reserves according to the exchange rate
+//
+// The bank's equity is the bank's reserves minus the bank's liabilities to the stablecoin holders
+// The bank's equity is owned by the reservecoin holders
+//
+// The bank profits (and its reserve grows) by trading the stablecoins and reservecoins using a spread
+// 
+// The bank's reserve ratio is the bank's reserves divided by the bank's liabilities
+// The bank is only allowed to issue and sell stablecoins if the reserve ratio remains above a minimum threshold
+// 
+// To avoid dilution (https://en.wikipedia.org/wiki/Stock_dilution), the bank is only allowed 
+// to issue and sell reservecoins if the reserve ratio remains below a maximum threshold
 
-class Bank(address: Address, // bank's address 
-           oracle: Oracle, // Oracle used by the bank
-           ledger: Ledger, // Ledger in which the bank participates
-           spread: BigDecimal, // the spread practiced by the bank when buying and selling stablecoins
-           minReserveLevel: BigDecimal, // the bank's minimum reserve level
-           maxReserveLevel: BigDecimal, // the bank's maximum reserve level 
-           base: Cryptocurrency, // the base cryptocurrency used by the bank (e.g. ERG or ADA)
-           share: Cryptocurrency, // shares issued by the bank to shareholders 
+
+class MinimalBank(protected val address: Address, // bank's address 
+           protected val oracle: Oracle, // Oracle used by the bank
+           protected val ledger: Ledger, // Ledger in which the bank participates
+           spread: BigDecimal, // the spread practiced by the bank when buying and selling stablecoins and reservecoins
+           minReserveRatio: BigDecimal, // the bank's minimum reserve ratio
+           protected val maxReserveRatio: BigDecimal, // the bank's maximum reserve ratio 
+           protected val base: Cryptocurrency, // the base cryptocurrency used by the bank (e.g. ERG or ADA)
+           reservecoin: Cryptocurrency, // shares issued by the bank to shareholders
            stablecoin: Stablecoin, // the stablecoin issued and managed by the bank
-           peg: Currency // the currency to which the stablecoin is pegged
+           protected val peg: Currency // the currency to which the stablecoin is pegged
           ) {
   
   // The bank's reserves in the base cryptocurrency (e.g. ERG or ADA)
-  private var reserve: BigDecimal = 0
+  protected var reserve: BigDecimal = 0
   
-  // The amount of Stablecoins currently in circulation
-  private var stablecoins: BigDecimal = 0
+  // The amount of stablecoins currently in circulation
+  protected var stablecoins: BigDecimal = 0
   
   // The addresses that hold shares of the bank and how many shares they hold
-  private val shareholders = MMap[Address, BigDecimal]()
+  protected val reservecoinholders = MMap[Address, BigDecimal]()
   
-  private def shares() = shareholders.values.fold(BigDecimal(0))(_ + _)
+  // The amount of reservecoins currently in circulation
+  protected def reservecoins() = reservecoinholders.values.fold(BigDecimal(0))(_ + _)
   
   // The amount of reserves that would have to be paid if 
   // all stablecoin holders decided to sell their stablecoins 
-  private def obligations() = max(reserve.toDouble, (stablecoins * oracle.conversionRate(peg, base) * (1 - spread/2)).toDouble)
+  private def liabilities() = min(reserve.toDouble, (stablecoins * oracle.conversionRate(peg, base) * (1 - spread/2)).toDouble)
   
-  def reserveLevel(res: BigDecimal, sc: BigDecimal) = ((res * oracle.conversionRate(base, peg)) / sc)
+  def reserveRatio(res: BigDecimal, sc: BigDecimal) = ((res * oracle.conversionRate(base, peg)) / sc)
   
   def buyStablecoin(amountBase: BigDecimal, buyerAddress: Address) = {
     val amountStablecoin = amountBase * oracle.conversionRate(base, peg) * (1 - spread/2) 
-    if (reserveLevel(reserve + amountBase, stablecoins + amountStablecoin) > minReserveLevel) {
+    if (reserveRatio(reserve + amountBase, stablecoins + amountStablecoin) > minReserveRatio) {
       stablecoins = stablecoins + amountStablecoin // issue desired amount of stablecoins
       reserve = reserve + amountBase
       val transferStablecoinsToBuyer = Transaction(address, buyerAddress, amountStablecoin, stablecoin)
@@ -83,11 +95,11 @@ class Bank(address: Address, // bank's address
   }
 
   def sellStablecoin(amountStablecoin: BigDecimal, sellerAddress: Address) = {
-    val rl = reserveLevel(reserve, stablecoins)
+    val rl = reserveRatio(reserve, stablecoins)
     
     val amountBase = amountStablecoin * oracle.conversionRate(peg, base) * (1 - spread/2) * min(1, rl.toDouble)
-    // note the "min(1, rl)" factor covers the case when the reserves are not sufficient
-    // to cover the redemption of all stablecoins in circulation (i.e. reserve level is below 1).
+    // the "min(1, rl)" factor covers the case when the reserves are not sufficient
+    // to cover the redemption of all stablecoins in circulation (i.e. reserve ratio is below 1).
     // in this case, the peg is gracefully and temporarily abandoned, to ensure that 
     // all stablecoin holders have the right to an equal share of the remaining reserves.
     
@@ -98,61 +110,58 @@ class Bank(address: Address, // bank's address
     ledger.addTransactions(List(transferStablecoinsToBank, transferBaseToSeller))
   }
   
-  def buyShares(amountBase: BigDecimal, buyerAddress: Address) = {
+  def buyReservecoin(amountBase: BigDecimal, buyerAddress: Address) = {
     val r = reserve
-    val o = obligations()
+    val o = liabilities()
     // amount of shares that the buyer will get, calculated so that the book value per share remains the same
-    val amountShares = shares() * (((r + amountBase - o) / (r - o)) - 1) * (1 - spread/2)
+    val amountShares = reservecoins() * (((r + amountBase - o) / (r - o)) - 1) * (1 - spread/2)
     
-    // TODO: the fair price for a share should take into account not only the book value 
-    // TODO: but also the present value of all expected future dividend payments
-    // TODO: we could also take the oracle into account and sell shares for a price
-    // TODO: that is the maximum of the fair price and the market price
-    
-    // FIXME: check that this doesn't bring the value of reserves above the max reserve level
+    // FIXME: check that this doesn't bring the value of reserves above the max reserve ratio
     
     reserve = reserve + amountBase
     val transferBaseToBank = Transaction(buyerAddress, address, amountBase, base)
-    shareholders(buyerAddress) = shareholders.getOrElse(buyerAddress, BigDecimal(0)) + amountShares
+    reservecoinholders(buyerAddress) = reservecoinholders.getOrElse(buyerAddress, BigDecimal(0)) + amountShares
     
     ledger.addTransactions(List(transferBaseToBank))
   }
   
-  
-  
-  def sellShares(amountShares: BigDecimal, sellerAddress: Address) = {
+  def sellReservecoin(amountShares: BigDecimal, sellerAddress: Address) = {
     val r = reserve
-    val o = obligations()
-    val amountBase = amountShares * (r - o)/shares() * (1 - spread/2)
+    val o = liabilities()
+    val amountBase = amountShares * (r - o)/reservecoins() * (1 - spread/2)
     
-    // TODO: the same comments from `buyShares` apply here as well
-    
-    // FIXME: check that the sale doesn't bring reserves below accceptable level
+    // FIXME: check that the sale doesn't bring reserves below accceptable ratio
     
     reserve = reserve - amountBase
     val transferBaseToSeller = Transaction(address, sellerAddress, amountBase, base)
-    shareholders(sellerAddress) = shareholders.getOrElse(sellerAddress, BigDecimal(0)) - amountShares
+    reservecoinholders(sellerAddress) = reservecoinholders.getOrElse(sellerAddress, BigDecimal(0)) - amountShares
 
     ledger.addTransactions(List(transferBaseToSeller))
   }
-  
-  // When the reserves exceed the maximum reserve by more than 10%, 
-  // dividends are paid to the shareholders to bring the reserve
+}
+
+trait WithDividendPayment(excessFactor: BigDecimal) extends MinimalBank {
+  require(excessFactor > 1.0)
+  // When the reserves exceed the maximum reserve multiplied by the excess factor, 
+  // dividends can be paid to the reservecoin holders to bring the reserve back to the maximum
   def payDividends() = {
-    val maxReserve = maxReserveLevel * stablecoins * oracle.conversionRate(peg, base)
-    if (reserve > 1.1 * maxReserve) { // FIXME: magic number
-      val dividendPerShare = (reserve - maxReserve) / shares()
-      val dividendTransactions = shareholders.map((shareholderAddress, amount) => Transaction(address, shareholderAddress, dividendPerShare * amount, base)).toList
+    val maxReserve = maxReserveRatio * stablecoins * oracle.conversionRate(peg, base)
+    if (reserve > excessFactor * maxReserve) {
+      val dividendPerShare = (reserve - maxReserve) / reservecoins()
+      val dividendTransactions = reservecoinholders.map((shareholderAddress, amount) => Transaction(address, shareholderAddress, dividendPerShare * amount, base)).toList
       reserve = maxReserve
       ledger.addTransactions(dividendTransactions)
     }
-    
-    // FIXME: pay enough dividends to bring reserve to "(min + max)/2"
   }
 }
 
-// TODO: this could be extended with bonds and other financial products later.
-// TODO: other financial products could include a "bear" coin, a "bull" coin, CFDs...
-// TODO: this could be generalized so that a single "bank" could issue
-// TODO: more than one stablecoin and have reserves in more than one base cryptocurrency.
-// TODO: we could also consider dividend reinvestment plans
+// Bonds and other financial products could be added as additional traits.
+
+// The "Bank" could be generalized so that a single "bank" could:
+//   * issue more than one stablecoin
+//   * have reserves in more than one base cryptocurrency
+
+// The fair price for a reservecoin could be not the book value 
+// but could also take into account the present value of all expected future dividend payments
+// It could also take the oracle into account and sell reservecoins for a price
+// that is the maximum of the fair price and the market price
