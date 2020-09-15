@@ -56,7 +56,7 @@ class Ledger {
 class MinimalBank(protected val address: Address, // bank's address 
            protected val oracle: Oracle, // Oracle used by the bank
            protected val ledger: Ledger, // Ledger in which the bank participates
-           spread: BigDecimal, // the spread practiced by the bank when buying and selling stablecoins and reservecoins
+           fee: BigDecimal, // the fee charged by the bank when buying and selling stablecoins and reservecoins
            minReserveRatio: BigDecimal, // the bank's minimum reserve ratio
            protected val maxReserveRatio: BigDecimal, // the bank's maximum reserve ratio 
            protected val base: Cryptocurrency, // the base cryptocurrency used by the bank (e.g. ERG or ADA)
@@ -79,12 +79,12 @@ class MinimalBank(protected val address: Address, // bank's address
   
   // The amount of reserves that would have to be paid if 
   // all stablecoin holders decided to sell their stablecoins 
-  private def liabilities() = min(reserve.toDouble, (stablecoins * oracle.conversionRate(peg, base) * (1 - spread/2)).toDouble)
+  private def liabilities() = min(reserve.toDouble, (stablecoins * oracle.conversionRate(peg, base) * (1 - fee)).toDouble)
   
   def reserveRatio(res: BigDecimal, sc: BigDecimal) = ((res * oracle.conversionRate(base, peg)) / sc)
   
   def buyStablecoin(amountBase: BigDecimal, buyerAddress: Address) = {
-    val amountStablecoin = amountBase * oracle.conversionRate(base, peg) * (1 - spread/2) 
+    val amountStablecoin = amountBase * oracle.conversionRate(base, peg) * (1 - fee) 
     if (reserveRatio(reserve + amountBase, stablecoins + amountStablecoin) > minReserveRatio) {
       stablecoins = stablecoins + amountStablecoin // issue desired amount of stablecoins
       reserve = reserve + amountBase
@@ -97,7 +97,7 @@ class MinimalBank(protected val address: Address, // bank's address
   def sellStablecoin(amountStablecoin: BigDecimal, sellerAddress: Address) = {
     val rl = reserveRatio(reserve, stablecoins)
     
-    val amountBase = amountStablecoin * oracle.conversionRate(peg, base) * (1 - spread/2) * min(1, rl.toDouble)
+    val amountBase = amountStablecoin * oracle.conversionRate(peg, base) * (1 - fee) * min(1, rl.toDouble)
     // the "min(1, rl)" factor covers the case when the reserves are not sufficient
     // to cover the redemption of all stablecoins in circulation (i.e. reserve ratio is below 1).
     // in this case, the peg is gracefully and temporarily abandoned, to ensure that 
@@ -114,7 +114,7 @@ class MinimalBank(protected val address: Address, // bank's address
     val r = reserve
     val o = liabilities()
     // amount of shares that the buyer will get, calculated so that the book value per share remains the same
-    val amountShares = reservecoins() * (((r + amountBase - o) / (r - o)) - 1) * (1 - spread/2)
+    val amountShares = reservecoins() * (((r + amountBase - o) / (r - o)) - 1) * (1 - fee)
     
     // FIXME: check that this doesn't bring the value of reserves above the max reserve ratio
     
@@ -128,7 +128,7 @@ class MinimalBank(protected val address: Address, // bank's address
   def sellReservecoin(amountShares: BigDecimal, sellerAddress: Address) = {
     val r = reserve
     val o = liabilities()
-    val amountBase = amountShares * (r - o)/reservecoins() * (1 - spread/2)
+    val amountBase = amountShares * (r - o)/reservecoins() * (1 - fee)
     
     // FIXME: check that the sale doesn't bring reserves below accceptable ratio
     
