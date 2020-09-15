@@ -71,11 +71,8 @@ class MinimalBank(protected val address: Address, // bank's address
   // The amount of stablecoins currently in circulation
   protected var stablecoins: BigDecimal = 0
   
-  // The addresses that hold shares of the bank and how many shares they hold
-  protected val reservecoinholders = MMap[Address, BigDecimal]()
-  
   // The amount of reservecoins currently in circulation
-  protected def reservecoins() = reservecoinholders.values.fold(BigDecimal(0))(_ + _)
+  protected var reservecoins: BigDecimal = 0
   
   // The amount of reserves that would have to be paid if 
   // all stablecoin holders decided to sell their stablecoins 
@@ -114,13 +111,13 @@ class MinimalBank(protected val address: Address, // bank's address
     val r = reserve
     val o = liabilities()
     // amount of shares that the buyer will get, calculated so that the book value per share remains the same
-    val amountShares = reservecoins() * (((r + amountBase - o) / (r - o)) - 1) * (1 - fee)
+    val amountShares = reservecoins * (((r + amountBase - o) / (r - o)) - 1) * (1 - fee)
     
     // FIXME: check that this doesn't bring the value of reserves above the max reserve ratio
     
     reserve = reserve + amountBase
     val transferBaseToBank = Transaction(buyerAddress, address, amountBase, base)
-    reservecoinholders(buyerAddress) = reservecoinholders.getOrElse(buyerAddress, BigDecimal(0)) + amountShares
+    reservecoins = reservecoins + amountShares
     
     ledger.addTransactions(List(transferBaseToBank))
   }
@@ -128,34 +125,19 @@ class MinimalBank(protected val address: Address, // bank's address
   def sellReservecoin(amountShares: BigDecimal, sellerAddress: Address) = {
     val r = reserve
     val o = liabilities()
-    val amountBase = amountShares * (r - o)/reservecoins() * (1 - fee)
+    val amountBase = amountShares * (r - o)/reservecoins * (1 - fee)
     
     // FIXME: check that the sale doesn't bring reserves below accceptable ratio
     
     reserve = reserve - amountBase
     val transferBaseToSeller = Transaction(address, sellerAddress, amountBase, base)
-    reservecoinholders(sellerAddress) = reservecoinholders.getOrElse(sellerAddress, BigDecimal(0)) - amountShares
+    reservecoins = reservecoins - amountShares
 
     ledger.addTransactions(List(transferBaseToSeller))
   }
 }
 
-trait WithDividendPayment(excessFactor: BigDecimal) extends MinimalBank {
-  require(excessFactor > 1.0)
-  // When the reserves exceed the maximum reserve multiplied by the excess factor, 
-  // dividends can be paid to the reservecoin holders to bring the reserve back to the maximum
-  def payDividends() = {
-    val maxReserve = maxReserveRatio * stablecoins * oracle.conversionRate(peg, base)
-    if (reserve > excessFactor * maxReserve) {
-      val dividendPerShare = (reserve - maxReserve) / reservecoins()
-      val dividendTransactions = reservecoinholders.map((shareholderAddress, amount) => Transaction(address, shareholderAddress, dividendPerShare * amount, base)).toList
-      reserve = maxReserve
-      ledger.addTransactions(dividendTransactions)
-    }
-  }
-}
-
-// Bonds and other financial products could be added as additional traits.
+// Dividend payments, bonds and other financial products could be added as additional features.
 
 // The "Bank" could be generalized so that a single "bank" could:
 //   * issue more than one stablecoin
