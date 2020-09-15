@@ -88,6 +88,7 @@ class MinimalBank(address: Address,   // bank's address
     r - liabilities(r, sc)
   } ensuring { _ >= 0 }  
   
+  // fixme: avoid this function, because it is not total
   private def reserveRatio(r: N, sc: N): N = {
     require(sc != 0)
     ((r * oracle.conversionRate(base, peg)) / sc)
