@@ -92,8 +92,6 @@ class MinimalBank(address: Address,   // bank's address
   
   private def minReserve(sc: N): N = minReserveRatio * sc * oracle.conversionRate(peg, base)
   
-  private def isReserveAcceptable(r: N, sc: N): Boolean = minReserve(sc) <= r && r <= maxReserve(sc)
-  
   private def reservecoinNominalPrice(r: N, sc: N, rc: N): N = {
     if (rc != 0) equity(r, sc)/rc
     else reservecoinDefaultPrice
@@ -108,11 +106,27 @@ class MinimalBank(address: Address,   // bank's address
   // ## General Functions
   // All functions here are total and side-effect free,
   // but they are not referentially transparent, because they depend on the bank's mutable state
+
+  // There are two conditions for the acceptability of a reserve change:
+  //  * If we are minting stablecoins or redeeming reservecoins, the new reserves shouldn't drop below the minimum.
+  //  * If we are minting reservecoins, the new reserves shouldn't rise above the maximum.
+  // Note that the new reserves can go above the maximum when stablecoins are being redeemed. 
+  // This ensures that stablecoin holders can always redeem their stablecoins. The only effect on 
+  // reservecoin holders when the reserves rise above the maximum is a reduction of the leverage of
+  // the reservecoins in relation to the base currency.
+  def acceptableReserveChange(mintsSC: Boolean,
+                              mintsRC: Boolean,
+                              redeemsRC: Boolean,
+                              r: N, sc: N): Boolean = {
+    def implies(a: Boolean, b: Boolean) = !a || b
+    implies((mintsSC || redeemsRC), (r >= minReserve(sc))) && implies(mintsRC, (r <= maxReserve(sc)))
+  }
+  
   
   // A transaction that mints/redeems `amountSC` and `amountRC` 
   // and withdraws/deposits `amountBase` in/from the bank
   // is valid if and only if all of the following hold:
-  //    * the reserve ratio remains acceptable
+  //    * the change in the reserves is acceptable
   //    * the price paid per reservecoin is the current nominal price
   //    * the price paid per stablecoin is the current nominal price
   //    * the fee paid is correct
@@ -123,11 +137,13 @@ class MinimalBank(address: Address,   // bank's address
     val scValueInBase = amountSC * stablecoinNominalPrice(reserves, stablecoins)
     val rcValueInBase = amountRC * reservecoinNominalPrice(reserves, stablecoins, reservecoins)
 
-    val acceptableReserve = isReserveAcceptable(reserves - amountBase + feeInBase, stablecoins + amountSC)
+    val newReserves = reserves - amountBase + feeInBase
+    val newStablecoins = stablecoins + amountSC
+    
     val correctPrices = { scValueInBase + rcValueInBase + amountBase == 0 }
     val correctFee = { feeInBase == (abs(amountBase) + abs(scValueInBase) + abs(rcValueInBase)) * fee }
     
-    acceptableReserve && correctPrices && correctFee
+    acceptableReserveChange(amountSC > 0, amountRC > 0, amountRC < 0, newReserves, newStablecoins) && correctPrices && correctFee
   }
   
   // Given amounts of stablecoins and reservecoins that one wants to mint (if positive) or redeem (if negative), 
@@ -139,8 +155,13 @@ class MinimalBank(address: Address,   // bank's address
     
     val amountBase = - (scValueInBase + rcValueInBase)
     val feee = (abs(amountBase) + abs(scValueInBase) + abs(rcValueInBase)) * fee
+
+    val newReserves = reserves - amountBase + feee
+    val newStablecoins = stablecoins + amountSC
     
-    if (isReserveAcceptable(reserves - amountBase + feee, stablecoins + amountSC)) Some((amountBase, feee))
+    if (acceptableReserveChange(amountSC > 0, amountRC > 0, amountRC < 0, newReserves, newStablecoins)) {
+      Some((amountBase, feee))
+    }
     else None
   } ensuring { _ match {
     case Some((amountBase, feeInBase)) => isValidTransaction(amountBase, amountSC, amountRC, feeInBase)
