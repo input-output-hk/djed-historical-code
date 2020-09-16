@@ -86,21 +86,13 @@ class MinimalBank(address: Address,   // bank's address
 
   private def equity(r: N, sc: N): N = {
     r - liabilities(r, sc)
-  } ensuring { _ >= 0 }  
+  } ensuring { _ >= 0 }
   
-  // fixme: avoid this function, because it is not total
-  private def reserveRatio(r: N, sc: N): N = {
-    require(sc != 0)
-    ((r * oracle.conversionRate(base, peg)) / sc)
-  }
+  private def maxReserve(sc: N): N = maxReserveRatio * sc * oracle.conversionRate(peg, base) 
   
-  private def isReserveRatioAcceptable(r: N, sc: N): Boolean = {
-    if (sc == 0) false
-    else {
-      val ratio = reserveRatio(r, sc)
-      ratio <= maxReserveRatio && ratio >= minReserveRatio
-    }
-  }
+  private def minReserve(sc: N): N = minReserveRatio * sc * oracle.conversionRate(peg, base)
+  
+  private def isReserveAcceptable(r: N, sc: N): Boolean = minReserve(sc) <= r && r <= maxReserve(sc)
   
   private def reservecoinNominalPrice(r: N, sc: N, rc: N): N = {
     if (rc != 0) equity(r, sc)/rc
@@ -131,11 +123,11 @@ class MinimalBank(address: Address,   // bank's address
     val scValueInBase = amountSC * stablecoinNominalPrice(reserves, stablecoins)
     val rcValueInBase = amountRC * reservecoinNominalPrice(reserves, stablecoins, reservecoins)
 
-    val correctRatio = isReserveRatioAcceptable(reserves - amountBase + feeInBase, stablecoins + amountSC)
+    val acceptableReserve = isReserveAcceptable(reserves - amountBase + feeInBase, stablecoins + amountSC)
     val correctPrices = { scValueInBase + rcValueInBase + amountBase == 0 }
     val correctFee = { feeInBase == (abs(amountBase) + abs(scValueInBase) + abs(rcValueInBase)) * fee }
     
-    correctRatio && correctPrices && correctFee
+    acceptableReserve && correctPrices && correctFee
   }
   
   // Given amounts of stablecoins and reservecoins that one wants to mint (if positive) or redeem (if negative), 
@@ -148,7 +140,7 @@ class MinimalBank(address: Address,   // bank's address
     val amountBase = - (scValueInBase + rcValueInBase)
     val feee = (abs(amountBase) + abs(scValueInBase) + abs(rcValueInBase)) * fee
     
-    if (isReserveRatioAcceptable(reserves - amountBase + feee, stablecoins + amountSC)) Some((amountBase, feee))
+    if (isReserveAcceptable(reserves - amountBase + feee, stablecoins + amountSC)) Some((amountBase, feee))
     else None
   } ensuring { _ match {
     case Some((amountBase, feeInBase)) => isValidTransaction(amountBase, amountSC, amountRC, feeInBase)
