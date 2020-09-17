@@ -133,16 +133,16 @@ class MinimalBank(address: Address,   // bank's address
   //
   // Note that a positive value means minting (in the case of `amountSC` and `amountRC`) 
   // or withdrawing (in the case of `amountBase`) and a negative value means redeeming or depositing (respectively)
-  def isValidTransaction(amountBase: N, amountSC: N, amountRC: N, feeInBase: N): Boolean = {
+  def isValidTransaction(amountBase: N, amountSC: N, amountRC: N, feee: N): Boolean = {
     val scValueInBase = amountSC * stablecoinNominalPrice(reserves, stablecoins)
     val rcValueInBase = amountRC * reservecoinNominalPrice(reserves, stablecoins, reservecoins)
 
-    val newReserves = reserves - amountBase + feeInBase
+    val newReserves = reserves - amountBase + feee
     val newStablecoins = stablecoins + amountSC
-    
+
     val correctPrices = { scValueInBase + rcValueInBase + amountBase == 0 }
-    val correctFee = { feeInBase == (abs(amountBase) + abs(scValueInBase) + abs(rcValueInBase)) * fee }
-    
+    val correctFee = { feee == (abs(scValueInBase) + abs(rcValueInBase)) * fee }
+
     acceptableReserveChange(amountSC > 0, amountRC > 0, amountRC < 0, newReserves, newStablecoins) && correctPrices && correctFee
   }
   
@@ -154,7 +154,7 @@ class MinimalBank(address: Address,   // bank's address
     val rcValueInBase = amountRC * reservecoinNominalPrice(reserves, stablecoins, reservecoins)
     
     val amountBase = - (scValueInBase + rcValueInBase)
-    val feee = (abs(amountBase) + abs(scValueInBase) + abs(rcValueInBase)) * fee
+    val feee = (abs(scValueInBase) + abs(rcValueInBase)) * fee
 
     val newReserves = reserves - amountBase + feee
     val newStablecoins = stablecoins + amountSC
