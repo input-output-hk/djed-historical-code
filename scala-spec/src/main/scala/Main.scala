@@ -92,15 +92,17 @@ class MinimalBank(address: Address,   // bank's address
 
   private def minReserve(sc: N): N = minReserveRatio * sc * oracle.conversionRate(peg, base)
 
+  // The reservecoin's nominal price is its book value 
+  // (i.e. the equity divided by the number of reservecoins in circulation).
+  // Alternatively, we could have taken into account the present value of expected future fee revenues
+  // or the market price of reservecoins provided by the oracle.
   private def reservecoinNominalPrice(r: N, sc: N, rc: N): N = {
-    if (rc != 0) equity(r, sc)/rc
-    else reservecoinDefaultPrice
+    if (rc != 0) equity(r, sc)/rc else reservecoinDefaultPrice
   }
 
   private def stablecoinNominalPrice(r: N, sc: N): N = {
     val p = oracle.conversionRate(peg, base)
-    if (sc == 0) p
-    else min(p, liabilities(r, sc)/sc)
+    if (sc == 0) p else min(p, liabilities(r, sc)/sc)
   }
 
   // ## General Functions
@@ -173,8 +175,3 @@ class MinimalBank(address: Address,   // bank's address
 // The "Bank" could be generalized so that a single "bank" could:
 //   * issue more than one stablecoin
 //   * have reserves in more than one base cryptocurrency
-
-// The fair price for a reservecoin could be not only the book value
-// but could also take into account the present value of expected future fee revenue
-// It could also take the oracle into account and sell reservecoins for a price
-// that is the maximum of the fair price and the market price
