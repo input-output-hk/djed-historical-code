@@ -52,14 +52,14 @@ class Ledger {
 // The bank profits (and its reserve grows) by minting and redeeming the stablecoins and reservecoins for a fee
 // 
 // The bank's reserve ratio is the bank's reserves divided by the amount of stablecoins in circulation
-// The bank is only allowed to issue and sell stablecoins and reservecoins if the reserve ratio 
-// remains above a minimum threshold and below a maximum threshold. 
-// The maximum threshold prevents dilution (https://en.wikipedia.org/wiki/Stock_dilution) for reservecoin holders. 
-// The minimum threshold aims to ensure that stablecoins remain fully backed by reserves 
+// The bank is only allowed to issue and sell stablecoins and reservecoins if the reserve ratio
+// remains above a minimum threshold and below a maximum threshold.
+// The maximum threshold prevents dilution (https://en.wikipedia.org/wiki/Stock_dilution) for reservecoin holders.
+// The minimum threshold aims to ensure that stablecoins remain fully backed by reserves
 // even if the price of the base currency falls.
 
 
-class MinimalBank(address: Address,   // bank's address 
+class MinimalBank(address: Address,   // bank's address
                   oracle: Oracle,     // Oracle used by the bank
                   ledger: Ledger,     // Ledger in which the bank participates
                   fee: N,  // the fee charged by the bank when buying and selling stablecoins and reservecoins
@@ -79,7 +79,7 @@ class MinimalBank(address: Address,   // bank's address
   
   // ## Auxiliary Functions
   // All functions here are total, side-effect-free and referentially transparent
-  
+
   private def liabilities(r: N, sc: N): N = {
     min(r, sc * oracle.conversionRate(peg, base))
   } ensuring { _ <= r}
@@ -87,22 +87,22 @@ class MinimalBank(address: Address,   // bank's address
   private def equity(r: N, sc: N): N = {
     r - liabilities(r, sc)
   } ensuring { _ >= 0 }
-  
-  private def maxReserve(sc: N): N = maxReserveRatio * sc * oracle.conversionRate(peg, base) 
-  
+
+  private def maxReserve(sc: N): N = maxReserveRatio * sc * oracle.conversionRate(peg, base)
+
   private def minReserve(sc: N): N = minReserveRatio * sc * oracle.conversionRate(peg, base)
-  
+
   private def reservecoinNominalPrice(r: N, sc: N, rc: N): N = {
     if (rc != 0) equity(r, sc)/rc
     else reservecoinDefaultPrice
-  } 
-  
+  }
+
   private def stablecoinNominalPrice(r: N, sc: N): N = {
     val p = oracle.conversionRate(peg, base)
     if (sc == 0) p
-    else min(p, liabilities(r, sc)/sc) 
+    else min(p, liabilities(r, sc)/sc)
   }
-  
+
   // ## General Functions
   // All functions here are total and side-effect free,
   // but they are not referentially transparent, because they depend on the bank's mutable state
@@ -110,8 +110,8 @@ class MinimalBank(address: Address,   // bank's address
   // There are two conditions for the acceptability of a reserve change:
   //  * If we are minting stablecoins or redeeming reservecoins, the new reserves shouldn't drop below the minimum.
   //  * If we are minting reservecoins, the new reserves shouldn't rise above the maximum.
-  // Note that the new reserves can go above the maximum when stablecoins are being redeemed. 
-  // This ensures that stablecoin holders can always redeem their stablecoins. The only effect on 
+  // Note that the new reserves can go above the maximum when stablecoins are being redeemed.
+  // This ensures that stablecoin holders can always redeem their stablecoins. The only effect on
   // reservecoin holders when the reserves rise above the maximum is a reduction of the leverage of
   // the reservecoins in relation to the base currency.
   def acceptableReserveChange(mintsSC: Boolean,
@@ -121,9 +121,9 @@ class MinimalBank(address: Address,   // bank's address
     def implies(a: Boolean, b: Boolean) = !a || b
     implies((mintsSC || redeemsRC), (r >= minReserve(sc))) && implies(mintsRC, (r <= maxReserve(sc)))
   }
-  
-  
-  // A transaction that mints/redeems `amountSC` and `amountRC` 
+
+
+  // A transaction that mints/redeems `amountSC` and `amountRC`
   // and withdraws/deposits `amountBase` in/from the bank
   // is valid if and only if all of the following hold:
   //    * the change in the reserves is acceptable
@@ -131,7 +131,7 @@ class MinimalBank(address: Address,   // bank's address
   //    * the price paid per stablecoin is the current nominal price
   //    * the fee paid is correct
   //
-  // Note that a positive value means minting (in the case of `amountSC` and `amountRC`) 
+  // Note that a positive value means minting (in the case of `amountSC` and `amountRC`)
   // or withdrawing (in the case of `amountBase`) and a negative value means redeeming or depositing (respectively)
   def isValidTransaction(amountBase: N, amountSC: N, amountRC: N, feee: N): Boolean = {
     val scValueInBase = amountSC * stablecoinNominalPrice(reserves, stablecoins)
@@ -145,20 +145,20 @@ class MinimalBank(address: Address,   // bank's address
 
     acceptableReserveChange(amountSC > 0, amountRC > 0, amountRC < 0, newReserves, newStablecoins) && correctPrices && correctFee
   }
-  
-  // Given amounts of stablecoins and reservecoins that one wants to mint (if positive) or redeem (if negative), 
+
+  // Given amounts of stablecoins and reservecoins that one wants to mint (if positive) or redeem (if negative),
   // this function calculates how much one should withdraw (of positive) or deposit in the base currency and the fee
   // that must be paid in base currency.
   def mintOrRedeem(amountSC: N, amountRC: N): Option[(N,N)] = {
     val scValueInBase = amountSC * stablecoinNominalPrice(reserves, stablecoins)
     val rcValueInBase = amountRC * reservecoinNominalPrice(reserves, stablecoins, reservecoins)
-    
+
     val amountBase = - (scValueInBase + rcValueInBase)
     val feee = (abs(scValueInBase) + abs(rcValueInBase)) * fee
 
     val newReserves = reserves - amountBase + feee
     val newStablecoins = stablecoins + amountSC
-    
+
     if (acceptableReserveChange(amountSC > 0, amountRC > 0, amountRC < 0, newReserves, newStablecoins)) {
       Some((amountBase, feee))
     }
@@ -174,7 +174,7 @@ class MinimalBank(address: Address,   // bank's address
 //   * issue more than one stablecoin
 //   * have reserves in more than one base cryptocurrency
 
-// The fair price for a reservecoin could be not only the book value 
+// The fair price for a reservecoin could be not only the book value
 // but could also take into account the present value of expected future fee revenue
 // It could also take the oracle into account and sell reservecoins for a price
 // that is the maximum of the fair price and the market price
