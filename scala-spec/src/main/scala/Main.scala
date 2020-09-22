@@ -167,6 +167,7 @@ class MinimalBank(address: Address,   // bank's address
     else None
   } ensuring { _ match {
     case Some((amountBase, feeInBase)) => isValidTransaction(amountBase, amountSC, amountRC, feeInBase)
+    case None => true
   }}
 }
 
